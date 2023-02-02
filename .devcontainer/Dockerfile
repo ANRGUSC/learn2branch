@@ -1,22 +1,5 @@
 FROM mcr.microsoft.com/devcontainers/miniconda:0-3
 
-# Copy environment.yml (if found) to a temp location so we update the environment. Also
-# copy "noop.txt" so the COPY instruction does not fail if no environment.yml exists.
-COPY environment.yml* .devcontainer/noop.txt /tmp/conda-tmp/
-RUN if [ -f "/tmp/conda-tmp/environment.yml" ]; then umask 0002 && /opt/conda/bin/conda env update -n base -f /tmp/conda-tmp/environment.yml; fi \
-    && rm -rf /tmp/conda-tmp
-
-# [Optional] Uncomment to install a different version of Python than the default
-# RUN conda install -y python=3.6 \
-#     && pip install --no-cache-dir pipx \
-#     && pipx reinstall-all
-
-# [Optional] Uncomment this section to install additional OS packages.
-# RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-#     && apt-get -y install --no-install-recommends <your-package-list-here>
-
-# Install Soplex
-
 ENV SCIPOPTDIR=/opt/scip
 
 # install build-essentials, cmake, make, etc.
@@ -45,7 +28,23 @@ RUN wget https://www.scipopt.org/download/release/scip-6.0.1.tgz && \
     cd ..
 
 # Intialize conda environment
-RUN conda init bash
+RUN conda update conda && \
+    conda create -n l2b python=3.6 && \
+    conda init
+SHELL ["/bin/bash", "--login", "-c"]
+RUN conda activate l2b && \
+    conda install cython numpy scikit-learn=0.20.2 tensorflow-gpu=1.12.0 && \
+    pip install git+https://github.com/ds4dm/PySCIPOpt.git@ml-branching && \
+    pip install git+https://github.com/jma127/pyltr@78fa0ebfef67d6594b8415aa5c6136e30a5e3395 && \
+    git clone https://github.com/ANRGUSC/PySVMRank.git && \
+    cd PySVMRank && \
+    git checkout bugfix/verbosity && \
+    wget http://download.joachims.org/svm_rank/current/svm_rank.tar.gz && \
+    mkdir src/c && \
+    tar -xzf svm_rank.tar.gz -C src/c && \
+    bash patch.sh && \ 
+    pip install .
 
-COPY .devcontainer/environment.yml environment.yml
-RUN conda env update -n base -f environment.yml
+
+# activate the conda environment "l2b" by default
+RUN echo "conda activate l2b" >> ~/.bashrc

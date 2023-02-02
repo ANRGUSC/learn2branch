@@ -11,8 +11,19 @@
 		"ghcr.io/devcontainers/features/git:1": {},
 		"ghcr.io/devcontainers/features/github-cli:1": {},
 		"ghcr.io/devcontainers/features/docker-in-docker:1": {}
-	}
+	},
+	"customizations": {
+		"vscode": {
+			"extensions": [
+				"GitHub.copilot"
+			]
+		}
+	},
 
+	// set default python interpreter
+	"settings": {
+		"python.defaultInterpreterPath": "/opt/conda/envs/l2b/bin/python"
+	}
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 
