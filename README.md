@@ -10,6 +10,22 @@ This is the official implementation of our NeurIPS 2019 [paper](https://arxiv.or
 
 See installation instructions [here](INSTALL.md).
 
+## Coder Template
+To push the pre-configured Coder template, run the following commands:
+```bash
+# Build the image
+docker build -t jaredraycoleman/learn2branch:latest . -f .devcontainer/Dockerfile # replace with your own dockerhub repo
+# Push the image
+docker push jaredraycoleman/learn2branch:latest # replace with your own dockerhub repo
+
+# Create the template
+coder templates create learn2branch # run this only the first time
+# Update the template
+coder templates push learn2branch # run this every time you update the template
+```
+
+```
+
 ## Running the experiments
 
 ### Set Covering

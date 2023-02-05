@@ -28,7 +28,7 @@ RUN wget https://www.scipopt.org/download/release/scip-6.0.1.tgz && \
     cd ..
 
 # Intialize conda environment
-RUN conda update conda && \
+RUN conda update -y conda && \
     conda create -n l2b python=3.6 && \
     conda init
 SHELL ["/bin/bash", "--login", "-c"]
@@ -46,5 +46,6 @@ RUN conda activate l2b && \
     pip install .
 
 
+USER vscode
 # activate the conda environment "l2b" by default
-RUN echo "conda activate l2b" >> ~/.bashrc
+RUN conda init && echo "conda activate l2b" >> ~/.bashrc
