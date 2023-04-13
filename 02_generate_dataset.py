@@ -217,7 +217,7 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
         Maximum running time for an episode, in seconds.
     """
     os.makedirs(out_dir, exist_ok=True)
-
+    
     # start workers
     orders_queue = mp.Queue(maxsize=2*n_jobs)
     answers_queue = mp.SimpleQueue()
@@ -232,7 +232,8 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
 
     tmp_samples_dir = f'{out_dir}/tmp'
     os.makedirs(tmp_samples_dir, exist_ok=True)
-
+    
+    print(f"disp started! sample que {answers_queue}")
     # start dispatcher
     dispatcher = mp.Process(
             target=send_orders,
@@ -240,6 +241,9 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
             daemon=True)
     dispatcher.start()
 
+
+    
+    print("record answers!")
     # record answers and write samples
     buffer = {}
     current_episode = 0
@@ -247,7 +251,7 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
     in_buffer = 0
     while i < n_samples:
         sample = answers_queue.get()
-
+        print(f" i {i} current ep {current_episode} , in buff {in_buffer}")
         # add received sample to buffer
         if sample['type'] == 'start':
             buffer[sample['episode']] = []
@@ -284,7 +288,7 @@ def collect_samples(instances, out_dir, rng, n_samples, n_jobs,
                     if i == n_samples:
                         buffer = {}
                         break
-
+    print("stop all workers (hard)")
     # stop all workers (hard)
     for p in workers:
         p.terminate()
@@ -297,7 +301,7 @@ if __name__ == '__main__':
     parser.add_argument(
         'problem',
         help='MILP instance type to process.',
-        choices=['setcover', 'cauctions', 'facilities', 'indset'],
+        choices=['makespan','setcover', 'cauctions', 'facilities', 'indset'],
     )
     parser.add_argument(
         '-s', '--seed',
@@ -315,9 +319,9 @@ if __name__ == '__main__':
 
     print(f"seed {args.seed}")
 
-    train_size = 100000
-    valid_size = 20000
-    test_size = 20000
+    train_size = 10000
+    valid_size = 2000
+    test_size  = 2000
     exploration_strategy = 'pscost'
     node_record_prob = 0.05
     time_limit = 3600
@@ -327,6 +331,13 @@ if __name__ == '__main__':
         instances_valid = glob.glob('data/instances/setcover/valid_500r_1000c_0.05d/*.lp')
         instances_test = glob.glob('data/instances/setcover/test_500r_1000c_0.05d/*.lp')
         out_dir = 'data/samples/setcover/500r_1000c_0.05d'
+
+    elif args.problem == 'makespan':
+        instances_train = glob.glob('data/instances/makespan/train/*.lp')
+        instances_valid = glob.glob('data/instances/makespan/valid/*.lp')
+        instances_test = glob.glob('data/instances/makespan/test/*.lp')
+        print(f"instances_train {instances_train}")
+        out_dir = 'data/samples/makespan'
 
     elif args.problem == 'cauctions':
         instances_train = glob.glob('data/instances/cauctions/train_100_500/*.lp')

@@ -5,6 +5,8 @@ import scipy.sparse
 import utilities
 from itertools import combinations
 
+from util_scheduling import *#face_recognition_task_graph
+    
 
 class Graph:
     """
@@ -235,18 +237,163 @@ def generate_setcover(nrows, ncols, density, filename, rng, max_coef=100):
     indices = A.indices
     indptr = A.indptr
 
+    print(len(c))
+    print("hw")
+    print(f"c --->\n{c}")
+    print(f"indices:\n{indices}")
+    
     # write problem
     with open(filename, 'w') as file:
         file.write("minimize\nOBJ:")
-        file.write("".join([f" +{c[j]} x{j+1}" for j in range(ncols)]))
+        file.write("".join([f" +{c[j]} x{j+1}{1}" for j in range(ncols)]))
 
         file.write("\n\nsubject to\n")
         for i in range(nrows):
-            row_cols_str = "".join([f" +1 x{j+1}" for j in indices[indptr[i]:indptr[i+1]]])
+            row_cols_str = "".join([f" +1 x{j+1}{1}" for j in indices[indptr[i]:indptr[i+1]]])
             file.write(f"C{i}:" + row_cols_str + f" >= 1\n")
 
         file.write("\nbinary\n")
-        file.write("".join([f" x{j+1}" for j in range(ncols)]))
+        file.write("".join([f" x{j+1}{1}" for j in range(ncols)]))
+
+
+def A_generate_makespan_problem(dag, p, d, e, B_list, filename):#, rng, max_coef=100):
+    """
+    Generates a makespan instance with specified characteristics, and writes
+    it to a file in the LP format.
+
+    
+    Parameters
+    ----------
+    dag : Dict (Assume starting task is min index of tasks)
+        dictionary of dag of task graph (indices start from 1)
+    p : Dict
+        dictionary of required computations for each task
+    e: Dict (indices start from 1)
+        dictionary of exec. speed of machines
+    B: Dict 
+        bandwidth between machines 
+    d: Dict
+        dictionary of generated data after exec. each task 
+    rng: numpy.random.RandomState
+        Random number generator
+    max_coef: int
+        Maximum objective coefficient (>=1)
+    """
+    #print("Injaa")
+    num_tasks = len(task_graph.keys())
+    drain_tasks = set(
+        k for k,v in task_graph.items() if len(v)==0
+    )
+    
+    B = dict()
+    for elem in e.keys():
+        B[elem] = dict()
+        for succ_elem in e.keys():
+            B[elem][succ_elem] = B_list[elem-1][succ_elem-1]
+    # --------------------------------------------------
+    c_t = [1.0]
+    M = 1000
+    upper_bound_s = sum([v for v in p.values()])/(1.0*max([speed for speed in e.values()]))
+    if upper_bound_s >= 0.1*M:
+        raise "upper bound is close to M!!! "
+    # ----- START:create preceeding matrix indicator ------
+    Q = dict()
+    for elem in task_graph.keys():
+        Q[elem] = dict()
+        for succ_elem in task_graph.keys():
+            Q[elem][succ_elem] = 0 
+    
+    def dfs_search(n):
+        nonlocal set_sofar
+            
+        for element in set_sofar:
+            Q[element][n] = 1
+            Q[n][element] = 1
+        
+        set_sofar.add(n)
+        for child in task_graph[n]:
+            dfs_search(child)
+        set_sofar.remove(n)
+    
+    set_sofar = set() #set([min(task_graph.keys())])
+    dfs_search(min(task_graph.keys()))
+     
+    # ----- END:create preceeding matrix indicator ------
+    
+    # write problem
+    with open(filename, 'w') as file:
+        
+        file.write("minimize\nOBJ:")
+        file.write("".join([f" +1 t_{j+1}" for j in range(len(c_t))]))
+        
+        
+        file.write("\n\nsubject to\n")
+        ## for enforcing t_1 >= s_j + \sum_m x[j][m]*p[j]/e[m] for all j,m 
+        idx_constraint = 0
+        for j in task_graph.keys():
+            row_cols_str = "".join([f" +1 t_1 -1 s_{j}"]) + "".join([f" -{p[j]/e[m]} x_{j}_{m}" for m in e.keys()])
+            file.write(f"C{idx_constraint}:" + row_cols_str + f" >= 0\n")
+            idx_constraint +=1
+        
+        ## for enforcing s_j >= 0 for all j in task_graph
+        for j in task_graph.keys():
+            row_cols_str = "".join([f" +1 s_{j}"])
+            file.write(f"C{idx_constraint}:" + row_cols_str + f" >= 0\n")
+            idx_constraint += 1
+
+        ## for enforcing s_j >= 0 for all j in task_graph
+        for j in task_graph.keys():
+            row_cols_str = "".join([f" +1 x_{j}_{m}" for m in e.keys()])
+            file.write(f"C{idx_constraint}:" + row_cols_str + f" == 1\n")
+            idx_constraint += 1
+
+        ## for enforcing s_j >= 0 for all j in task_graph
+        for j in task_graph.keys():
+            for k in task_graph[j]:
+                row_cols_str = "".join([f" +1 s_{k} -1 s_{j}"])
+                file.write(f"C{idx_constraint}:" + row_cols_str + f" >= 0\n")
+                idx_constraint += 1
+
+                for a in e.keys():
+                    for b in e.keys():
+                        D_j_a_PLUS_C_j_a_b = (d[j]/B[a][b])+(p[j]/e[a])
+                        row_cols_str = "".join([f" +1 s_{k} -1 s_{j} -{D_j_a_PLUS_C_j_a_b} x_{j}_{a} -{D_j_a_PLUS_C_j_a_b} x_{k}_{b}"])#+ {(d[j]/B[m][n])+p[ell]/e[n]}
+                        file.write(f"C{idx_constraint}:" + row_cols_str + f" >= -{D_j_a_PLUS_C_j_a_b}\n")
+                        idx_constraint += 1
+
+        
+        ## for enforcing nonoverlapping tasks
+        for j in task_graph.keys():
+            for k in task_graph.keys():
+                if j != k and Q[j][k]==0:
+                    #print(f"could overlap:{j},{k}")
+                    row_cols_str = "".join([f" +1 s_{k} -1 s_{j}"]) + "".join([f" {-p[j]/e[a]} x_{j}_{a}" for a in e.keys()]) + "".join([f" +{M} z_{j}_{k}"])
+                    file.write(f"C{idx_constraint}:" + row_cols_str + f" >= 0\n")
+                    idx_constraint += 1
+
+                    row_cols_str = "".join([f" +1 s_{k} -1 s_{j}"]) + "".join([f" {-p[j]/e[a]} x_{j}_{a}" for a in e.keys()]) + "".join([f" +{M} z_{j}_{k}"])
+                    file.write(f"C{idx_constraint}:" + row_cols_str + f" <= {M-1}\n")
+                    idx_constraint += 1
+
+        ## constraint for not overlapping >=3
+        for j in task_graph.keys():
+            for k in task_graph.keys():
+                if j != k:
+                    for a in e.keys():
+                        row_cols_str = "".join([f" +1 x_{j}_{a} +1 x_{k}_{a} +1 z_{j}_{k} +1 z_{k}_{j}"]) 
+                        file.write(f"C{idx_constraint}:" + row_cols_str + f" <= 3\n")
+                        idx_constraint += 1
+
+
+        file.write("\nbounds\n")
+        #file.write(f"0 <= t_1\n")
+        for j in task_graph.keys():
+            file.write(f"0 <= s_{j} <= {M}\n")
+        # specify the Binarry variables
+        file.write("\nbinary\n")
+        file.write("".join([f" x_{j}_{m}" for j in task_graph.keys() for m in e.keys()]) + "".join([f" z_{j}_{k}" for j in task_graph.keys() for k in task_graph.keys() if j != k ])  )
+
+
 
 
 def generate_cauctions(random, filename, n_items=100, n_bids=500, min_value=1, max_value=100,
@@ -422,23 +569,47 @@ def generate_cauctions(random, filename, n_items=100, n_bids=500, min_value=1, m
         bids_per_item = [[] for item in range(n_items + n_dummy_items)]
 
         file.write("maximize\nOBJ:")
-        for i, bid in enumerate(bids):
-            bundle, price = bid
-            file.write(f" +{price} x{i+1}")
-            for item in bundle:
-                bids_per_item[item].append(i)
+        # for i, bid in enumerate(bids):
+        #     bundle, price = bid
+        #     file.write(f" +{price} x{i+1}")
+        #     for item in bundle:
+        #         bids_per_item[item].append(i)
+
+        file.write(f" +{2.0} x_1 +{3.2} x_2")
 
         file.write("\n\nsubject to\n")
-        for item_bids in bids_per_item:
-            if item_bids:
-                for i in item_bids:
-                    file.write(f" +1 x{i+1}")
-                file.write(f" <= 1\n")
+        # for item_bids in bids_per_item:
+        #     if item_bids:
+        #         for i in item_bids:
+        #             file.write(f" +1 x{i+1}")
+        #         file.write(f" <= 1\n")
+        file.write("".join([f" +2.0 x_1 +3.0 x_2 <= 5.0\n"]))
+        file.write("".join([f" +4.0 x_1 +7.0 x_2 <= 8.0\n"]))
+        
+
 
         file.write("\nbinary\n")
-        for i in range(len(bids)):
-            file.write(f" x{i+1}")
+        # for i in range(len(bids)):
+        #     file.write(f" x{i+1}")
+        
+        file.write(f" x_1 x_2")
+        #####
+        # file.write("maximize\nOBJ:")
+        # file.write("".join([f" +10 x_1 +15 x_2"]))
 
+        # file.write("\n\nsubject to\n")
+        # file.write("".join([f" +2 x_1 +3 x_2 <= 5\n"]))
+        # file.write("".join([f" +4 x_1 +2 x_2 <= 7\n"]))
+        # # file.write("".join([f" +1 x_1 +1 x_2 <= 200\n"]))
+        # # file.write("".join([f" -1 x_1 -1 x_2 <= -125\n"]))
+        # # file.write("".join([f" +1 x_3 <= 200\n"]))
+
+        # # file.write("\nbounds\n")
+        # # file.write(f"0 <= x_1 <= 1\n")
+        # # file.write(f"0 <= x_2 <= 1\n")
+
+        # file.write("\nbinary\n")
+        # file.write("".join([f" x_1 x_2"]))
 
 def generate_capacited_facility_location(random, filename, n_customers, n_facilities, ratio):
     """
@@ -519,7 +690,7 @@ if __name__ == '__main__':
     parser.add_argument(
         'problem',
         help='MILP instance type to process.',
-        choices=['setcover', 'cauctions', 'facilities', 'indset'],
+        choices=['makespan','setcover', 'cauctions', 'facilities', 'indset'],
     )
     parser.add_argument(
         '-s', '--seed',
@@ -530,7 +701,8 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     rng = np.random.RandomState(args.seed)
-
+    print("Graphh:",rng)
+     
     if args.problem == 'setcover':
         nrows = 500
         ncols = 1000
@@ -543,7 +715,7 @@ if __name__ == '__main__':
         denss = []
 
         # train instances
-        n = 10000
+        n = 1#10000
         lp_dir = f'data/instances/setcover/train_{nrows}r_{ncols}c_{dens}d'
         print(f"{n} instances in {lp_dir}")
         os.makedirs(lp_dir)
@@ -551,70 +723,195 @@ if __name__ == '__main__':
         nrowss.extend([nrows] * n)
         ncolss.extend([ncols] * n)
         denss.extend([dens] * n)
+        
+        # # validation instances
+        # n = 10#2000
+        # lp_dir = f'data/instances/setcover/valid_{nrows}r_{ncols}c_{dens}d'
+        # print(f"{n} instances in {lp_dir}")
+        # os.makedirs(lp_dir)
+        # filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
+        # nrowss.extend([nrows] * n)
+        # ncolss.extend([ncols] * n)
+        # denss.extend([dens] * n)
+
+        # # small transfer instances
+        # n = 10#100
+        # nrows = 500
+        # lp_dir = f'data/instances/setcover/transfer_{nrows}r_{ncols}c_{dens}d'
+        # print(f"{n} instances in {lp_dir}")
+        # os.makedirs(lp_dir)
+        # filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
+        # nrowss.extend([nrows] * n)
+        # ncolss.extend([ncols] * n)
+        # denss.extend([dens] * n)
+
+        # # medium transfer instances
+        # n = 10#100
+        # nrows = 1000
+        # lp_dir = f'data/instances/setcover/transfer_{nrows}r_{ncols}c_{dens}d'
+        # print(f"{n} instances in {lp_dir}")
+        # os.makedirs(lp_dir)
+        # filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
+        # nrowss.extend([nrows] * n)
+        # ncolss.extend([ncols] * n)
+        # denss.extend([dens] * n)
+
+        # # big transfer instances
+        # n = 10#100
+        # nrows = 2000
+        # lp_dir = f'data/instances/setcover/transfer_{nrows}r_{ncols}c_{dens}d'
+        # print(f"{n} instances in {lp_dir}")
+        # os.makedirs(lp_dir)
+        # filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
+        # nrowss.extend([nrows] * n)
+        # ncolss.extend([ncols] * n)
+        # denss.extend([dens] * n)
+
+        # # test instances
+        # n = 10#2000
+        # nrows = 500
+        # ncols = 1000
+        # lp_dir = f'data/instances/setcover/test_{nrows}r_{ncols}c_{dens}d'
+        # print(f"{n} instances in {lp_dir}")
+        # os.makedirs(lp_dir)
+        # filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
+        # nrowss.extend([nrows] * n)
+        # ncolss.extend([ncols] * n)
+        # denss.extend([dens] * n)
+
+        # # actually generate the instances
+        # for filename, nrows, ncols, dens in zip(filenames, nrowss, ncolss, denss):
+        #     print(f'  generating file {filename} ...')
+        #     generate_setcover(nrows=nrows, ncols=ncols, density=dens, filename=filename, rng=rng, max_coef=max_coef)
+
+        # print('done.')
+
+    elif args.problem == 'makespan':
+        #print("Injaa1")
+        #{1:[2],2:[3],3:[]}#
+        # d = {k:1.0 for k in task_graph.keys()}
+        # p = {k:1.0 for k in task_graph.keys()}
+        # e = {1:1.0,2:1.0}
+        # B_list = [[1,1],[2,2]]
+        
+        # B = dict()
+        # for elem in e.keys():
+        #     B[elem] = dict()
+        #     for succ_elem in e.keys():
+        #         B[elem][succ_elem] = B_list[elem-1][succ_elem-1]
+            
+
+
+
+
+        # lp_dir = f'data/instances/makespan/d_0'
+        # print(f" instances in {lp_dir}")
+        # os.makedirs(lp_dir)
+        # filenames = []
+        # filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(1)])
+        # #generate_makespan_problem(task_graph,p,e,B,d)
+        #######
+        #######
+        
+        filenames = []
+        # train instances
+        n = 10000
+        lp_dir = f'data/instances/makespan/train'
+        print(f"{n} instances in {lp_dir}")
+        os.makedirs(lp_dir)
+        filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
 
         # validation instances
         n = 2000
-        lp_dir = f'data/instances/setcover/valid_{nrows}r_{ncols}c_{dens}d'
+        lp_dir = f'data/instances/makespan/valid'
         print(f"{n} instances in {lp_dir}")
         os.makedirs(lp_dir)
         filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
-        nrowss.extend([nrows] * n)
-        ncolss.extend([ncols] * n)
-        denss.extend([dens] * n)
-
+        
         # small transfer instances
-        n = 100
-        nrows = 500
-        lp_dir = f'data/instances/setcover/transfer_{nrows}r_{ncols}c_{dens}d'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
-        nrowss.extend([nrows] * n)
-        ncolss.extend([ncols] * n)
-        denss.extend([dens] * n)
+        # n = 100
+        # lp_dir = f'data/instances/makespan/transfer1'
+        # print(f"{n} instances in {lp_dir}")
+        # os.makedirs(lp_dir)
+        # filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
+        
 
-        # medium transfer instances
-        n = 100
-        nrows = 1000
-        lp_dir = f'data/instances/setcover/transfer_{nrows}r_{ncols}c_{dens}d'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
-        nrowss.extend([nrows] * n)
-        ncolss.extend([ncols] * n)
-        denss.extend([dens] * n)
+        # # # medium transfer instances
+        # n = 100
+        # lp_dir = f'data/instances/makespan/transfer2'
+        # print(f"{n} instances in {lp_dir}")
+        # os.makedirs(lp_dir)
+        # filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
 
-        # big transfer instances
-        n = 100
-        nrows = 2000
-        lp_dir = f'data/instances/setcover/transfer_{nrows}r_{ncols}c_{dens}d'
-        print(f"{n} instances in {lp_dir}")
-        os.makedirs(lp_dir)
-        filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
-        nrowss.extend([nrows] * n)
-        ncolss.extend([ncols] * n)
-        denss.extend([dens] * n)
-
-        # test instances
+        # # # big transfer instances
+        # n = 100
+        # lp_dir = f'data/instances/makespan/transfer3'
+        # print(f"{n} instances in {lp_dir}")
+        # os.makedirs(lp_dir)
+        # filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
+        
+        # # test instances
         n = 2000
-        nrows = 500
-        ncols = 1000
-        lp_dir = f'data/instances/setcover/test_{nrows}r_{ncols}c_{dens}d'
+        lp_dir = f'data/instances/makespan/test'
         print(f"{n} instances in {lp_dir}")
         os.makedirs(lp_dir)
         filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(n)])
-        nrowss.extend([nrows] * n)
-        ncolss.extend([ncols] * n)
-        denss.extend([dens] * n)
+        
 
         # actually generate the instances
-        for filename, nrows, ncols, dens in zip(filenames, nrowss, ncolss, denss):
+        for filename in filenames:
             print(f'  generating file {filename} ...')
-            generate_setcover(nrows=nrows, ncols=ncols, density=dens, filename=filename, rng=rng, max_coef=max_coef)
+            # ##  ----- input settiings ----
+            # prb = np.random.rand()
+            # if prb < .3:
 
+            # elif 0.3 <= prb < .6:
+
+            # else
+            task_graph = multi_chain(np.random.randint(low=1,high=5),np.random.randint(low=1,high=5))#face_recognition_task_graph()
+            d = {k:np.random.rand() for k in task_graph.keys()}
+            p = {k:np.random.rand() for k in task_graph.keys()}
+    
+            num_machines = 4
+            e = {k:np.random.uniform(low=.3, high=1.0) for k in range(1,num_machines+1)}#np.random.uniform(low=.3, high=1.0)
+            B_list = [[10.0*np.random.uniform(low=.3, high=1.0) for _ in range(num_machines)] for _ in range(num_machines)]#
+
+            for i in range(num_machines):
+                B_list[i][i] = 10000.0   
+
+            B = dict()
+            for elem in e.keys():
+                B[elem] = dict()
+                for succ_elem in e.keys():
+                    B[elem][succ_elem] = B_list[elem-1][succ_elem-1]
+            # d = {k:np.random.rand() for k in task_graph.keys()}
+            # p = {k:np.random.rand() for k in task_graph.keys()}
+            # num_machines = 2
+            # #np.random.uniform(low=0.5,high=1.0)
+            # e = {k:1.0 for k in range(1,num_machines+1)}
+            # B_list = [[1,1],[2,2]]#[[1.0 for _ in range(num_machines)] for _ in range(num_machines)]#
+            
+            # # for i in range(num_machines): # for enforcing highbandwidth for same 
+            # #     B_list[i][i] = 10.0
+            generate_makespan_problem(task_graph, p, d, e, B, filename=filename)
         print('done.')
 
+
+
+
+
+        #######
+        #######
+        # for filename in filenames:
+        #     print(f'  generating file {filename} ...')
+        #     generate_makespan_problem(task_graph,p,e,B,d, filename=filename)
+
+        # print('done.')
+
+
+
     elif args.problem == 'indset':
+    
         number_of_nodes = 500
         affinity = 4
 
@@ -622,7 +919,7 @@ if __name__ == '__main__':
         nnodess = []
 
         # train instances
-        n = 10000
+        n = 1#10000
         lp_dir = f'data/instances/indset/train_{number_of_nodes}_{affinity}'
         print(f"{n} instances in {lp_dir}")
         os.makedirs(lp_dir)
@@ -630,7 +927,7 @@ if __name__ == '__main__':
         nnodess.extend([number_of_nodes] * n)
 
         # validation instances
-        n = 2000
+        n = 1#2000
         lp_dir = f'data/instances/indset/valid_{number_of_nodes}_{affinity}'
         print(f"{n} instances in {lp_dir}")
         os.makedirs(lp_dir)
@@ -638,7 +935,7 @@ if __name__ == '__main__':
         nnodess.extend([number_of_nodes] * n)
 
         # small transfer instances
-        n = 100
+        n = 1#100
         number_of_nodes = 500
         lp_dir = f'data/instances/indset/transfer_{number_of_nodes}_{affinity}'
         print(f"{n} instances in {lp_dir}")
@@ -647,7 +944,7 @@ if __name__ == '__main__':
         nnodess.extend([number_of_nodes] * n)
 
         # medium transfer instances
-        n = 100
+        n = 1#100
         number_of_nodes = 1000
         lp_dir = f'data/instances/indset/transfer_{number_of_nodes}_{affinity}'
         print(f"{n} instances in {lp_dir}")
@@ -656,7 +953,7 @@ if __name__ == '__main__':
         nnodess.extend([number_of_nodes] * n)
 
         # big transfer instances
-        n = 100
+        n = 1#100
         number_of_nodes = 1500
         lp_dir = f'data/instances/indset/transfer_{number_of_nodes}_{affinity}'
         print(f"{n} instances in {lp_dir}")
@@ -665,7 +962,7 @@ if __name__ == '__main__':
         nnodess.extend([number_of_nodes] * n)
 
         # test instances
-        n = 2000
+        n = 1#2000
         number_of_nodes = 500
         lp_dir = f'data/instances/indset/test_{number_of_nodes}_{affinity}'
         print(f"{n} instances in {lp_dir}")
@@ -689,7 +986,7 @@ if __name__ == '__main__':
         nbidss = []
 
         # train instances
-        n = 10000
+        n = 1#10000
         lp_dir = f'data/instances/cauctions/train_{number_of_items}_{number_of_bids}'
         print(f"{n} instances in {lp_dir}")
         os.makedirs(lp_dir)
@@ -698,7 +995,7 @@ if __name__ == '__main__':
         nbidss.extend([number_of_bids ] * n)
 
         # validation instances
-        n = 2000
+        n = 1#2000
         lp_dir = f'data/instances/cauctions/valid_{number_of_items}_{number_of_bids}'
         print(f"{n} instances in {lp_dir}")
         os.makedirs(lp_dir)
@@ -707,7 +1004,7 @@ if __name__ == '__main__':
         nbidss.extend([number_of_bids ] * n)
 
         # small transfer instances
-        n = 100
+        n = 1#100
         number_of_items = 100
         number_of_bids = 500
         lp_dir = f'data/instances/cauctions/transfer_{number_of_items}_{number_of_bids}'
@@ -718,7 +1015,7 @@ if __name__ == '__main__':
         nbidss.extend([number_of_bids ] * n)
 
         # medium transfer instances
-        n = 100
+        n = 1#100
         number_of_items = 200
         number_of_bids = 1000
         lp_dir = f'data/instances/cauctions/transfer_{number_of_items}_{number_of_bids}'
@@ -729,7 +1026,7 @@ if __name__ == '__main__':
         nbidss.extend([number_of_bids ] * n)
 
         # big transfer instances
-        n = 100
+        n = 1#100
         number_of_items = 300
         number_of_bids = 1500
         lp_dir = f'data/instances/cauctions/transfer_{number_of_items}_{number_of_bids}'
@@ -740,7 +1037,7 @@ if __name__ == '__main__':
         nbidss.extend([number_of_bids ] * n)
 
         # test instances
-        n = 2000
+        n = 1#2000
         number_of_items = 100
         number_of_bids = 500
         lp_dir = f'data/instances/cauctions/test_{number_of_items}_{number_of_bids}'

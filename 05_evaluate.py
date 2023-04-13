@@ -16,6 +16,7 @@ import svmrank
 
 import utilities
 
+from util_scheduling import *#generate_makespan_problem, face_recognition_task_graph, heft_task_assignment
 
 class PolicyBranching(scip.Branchrule):
 
@@ -129,7 +130,7 @@ if __name__ == '__main__':
     parser.add_argument(
         'problem',
         help='MILP instance type to process.',
-        choices=['setcover', 'cauctions', 'facilities', 'indset'],
+        choices=['makespan','setcover', 'cauctions', 'facilities', 'indset'],
     )
     parser.add_argument(
         '-g', '--gpu',
@@ -141,9 +142,13 @@ if __name__ == '__main__':
 
     result_file = f"{args.problem}_{time.strftime('%Y%m%d-%H%M%S')}.csv"
     instances = []
-    seeds = [0, 1, 2, 3, 4]
+    #####
+    seeds = [0]#, 1, 2, 3, 4]
+    #####
     gcnn_models = ['baseline']
-    other_models = ['extratrees_gcnn_agg', 'lambdamart_khalil', 'svmrank_khalil']
+    #####
+    other_models = []#['extratrees_gcnn_agg', 'lambdamart_khalil', 'svmrank_khalil']
+    #####
     internal_branchers = ['relpscost']
     time_limit = 3600
 
@@ -152,6 +157,51 @@ if __name__ == '__main__':
         instances += [{'type': 'medium', 'path': f"data/instances/setcover/transfer_1000r_1000c_0.05d/instance_{i+1}.lp"} for i in range(20)]
         instances += [{'type': 'big', 'path': f"data/instances/setcover/transfer_2000r_1000c_0.05d/instance_{i+1}.lp"} for i in range(20)]
         gcnn_models += ['mean_convolution', 'no_prenorm']
+    
+    elif args.problem == 'makespan':
+
+        instances += [{'type': 'small', 'path': f"data/instances/makespan/transfer/instance_{i+1}.lp"} for i in range(1)]
+        #instances += [{'type': 'medium', 'path': f"data/instances/makespan/transfer2/instance_{i+1}.lp"} for i in range(20)]
+        #instances += [{'type': 'big', 'path': f"data/instances/makespan/transfer3/instance_{i+1}.lp"} for i in range(20)]
+        gcnn_models += ['mean_convolution', 'no_prenorm']
+
+        ## -----------------------------
+        #dict_type = {'small':'transfer1', 'medium':'transfer2', 'big':'transfer3'}
+
+        lp_dir = f'data/instances/makespan/transfer'
+        os.makedirs(lp_dir)
+        
+        filenames = []
+        filenames.extend([os.path.join(lp_dir, f'instance_{i+1}.lp') for i in range(len(instances))])
+        print(filenames)
+        dict_orders = dict()
+        dict_jobson = dict()
+        for filename in filenames:
+            # create setttings
+            task_graph = multi_chain(3,3)#face_recognition_task_graph()#
+            d = {k:np.random.rand() for k in task_graph.keys()}#`np.random.rand()`
+            p = {k:1.0 for k in task_graph.keys()}
+
+            num_machines = 4
+            e = {1:1.0,2:1.0,3:2.0,4:2.0}#{k:1.0 for k in range(1,num_machines+1)}#
+            B_list = [[1000.0*np.random.uniform(low=.1, high=1.0) for _ in range(num_machines)] for _ in range(num_machines)]#
+            for i in range(num_machines):
+                B_list[i][i] = 10000.0
+
+            B = dict()
+            for elem in e.keys():
+                B[elem] = dict()
+                for succ_elem in e.keys():
+                    B[elem][succ_elem] = B_list[elem-1][succ_elem-1]
+
+            generate_makespan_problem(task_graph, p, d, e, B, filename=filename)
+
+            order, jobson = heft_task_assignment(task_graph,p,d,e,B)
+            
+            #print(f"order for this: {order} {jobson}")
+            dict_orders[filename] = order
+            dict_jobson[filename] = jobson
+
 
     elif args.problem == 'cauctions':
         instances += [{'type': 'small', 'path': f"data/instances/cauctions/transfer_100_500/instance_{i+1}.lp"} for i in range(20)]
@@ -173,23 +223,26 @@ if __name__ == '__main__':
 
     branching_policies = []
 
-    # SCIP internal brancher baselines
-    for brancher in internal_branchers:
-        for seed in seeds:
-            branching_policies.append({
-                    'type': 'internal',
-                    'name': brancher,
-                    'seed': seed,
-             })
-    # ML baselines
-    for model in other_models:
-        for seed in seeds:
-            branching_policies.append({
-                'type': 'ml-competitor',
-                'name': model,
-                'seed': seed,
-                'model': f'trained_models/{args.problem}/{model}/{seed}',
-            })
+    #--- SCIP internal brancher baselines
+    # for brancher in internal_branchers:
+    #     for seed in seeds:
+    #         branching_policies.append({
+    #                 'type': 'internal',
+    #                 'name': brancher,
+    #                 'seed': seed,
+    #          })
+
+    #--- ML baselines
+    # for model in other_models:
+    #     for seed in seeds:
+    #         branching_policies.append({
+    #             'type': 'ml-competitor',
+    #             'name': model,
+    #             'seed': seed,
+    #             'model': f'trained_models/{args.problem}/{model}/{seed}',
+    #         })
+
+
     # GCNN models
     for model in gcnn_models:
         for seed in seeds:
@@ -245,7 +298,10 @@ if __name__ == '__main__':
                     policy['model'] = pickle.load(f)
 
     print("running SCIP...")
+    ## ----------
+    final_result = dict()
 
+    ## ----------
     fieldnames = [
         'policy',
         'seed',
@@ -294,6 +350,8 @@ if __name__ == '__main__':
                 walltime = time.perf_counter() - walltime
                 proctime = time.process_time() - proctime
 
+
+                print(f"{policy['name']} time of opt is {walltime} and {proctime}")
                 stime = m.getSolvingTime()
                 nnodes = m.getNNodes()
                 nlps = m.getNLPs()
@@ -301,7 +359,28 @@ if __name__ == '__main__':
                 status = m.getStatus()
                 ndomchgs = brancher.ndomchgs
                 ncutoffs = brancher.ncutoffs
+                
+                ####  --------  schedule ---------
+                
+                varss = m.getVars(transformed=False)
+                for var in varss:
+                    print(f"values {var}: {m.getVal(var)}")
+                    
+                    if var.name=='t_1':
+                        print(f"MIP solver value for {var}: {m.getVal(var)}")
+                        print(f"heft",dict_jobson[instance['path']])
+                    #print("ssss",m.getVal('t_1'))
+                final_result[instance['path']] =  var
+                #solution = m.getBestSol()
+                #print("t_1",solution.getObjVal())    
+                for k,v in dict_orders[instance['path']].items():
+                    for eve in v:
+                        if eve.job==10:
+                            print(f"===***>\n order {max(eve.end for eve in v)}")
+                        #print(f"===>\n order {order}\n jobson {jobson}")
+                print(f"========heft")
 
+                ### -------------------------------
                 writer.writerow({
                     'policy': f"{policy['type']}:{policy['name']}",
                     'seed': policy['seed'],

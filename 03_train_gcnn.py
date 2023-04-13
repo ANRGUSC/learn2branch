@@ -65,11 +65,12 @@ def process(model, dataloader, top_k, optimizer=None):
     mean_kacc = np.zeros(len(top_k))
 
     n_samples_processed = 0
+    print("==>>",dataloader)
     for batch in dataloader:
         c, ei, ev, v, n_cs, n_vs, n_cands, cands, best_cands, cand_scores = batch
         batched_states = (c, ei, ev, v, tf.reduce_sum(n_cs, keepdims=True), tf.reduce_sum(n_vs, keepdims=True))  # prevent padding
         batch_size = len(n_cs.numpy())
-
+        
         if optimizer:
             with tf.GradientTape() as tape:
                 logits = model(batched_states, tf.convert_to_tensor(True)) # training mode
@@ -99,7 +100,9 @@ def process(model, dataloader, top_k, optimizer=None):
         mean_loss += loss.numpy() * batch_size
         mean_kacc += kacc * batch_size
         n_samples_processed += batch_size
-
+        print("---------")
+        print(f"batch_size:{batch_size} mean_loss:{mean_loss}")
+    print(f"n_samples_processed {n_samples_processed}")
     mean_loss /= n_samples_processed
     mean_kacc /= n_samples_processed
 
@@ -111,7 +114,7 @@ if __name__ == '__main__':
     parser.add_argument(
         'problem',
         help='MILP instance type to process.',
-        choices=['setcover', 'cauctions', 'facilities', 'indset'],
+        choices=['makespan','setcover', 'cauctions', 'facilities', 'indset'],
     )
     parser.add_argument(
         '-m', '--model',
@@ -151,6 +154,7 @@ if __name__ == '__main__':
         'cauctions': 'cauctions/100_500',
         'facilities': 'facilities/100_100_5',
         'indset': 'indset/500_4',
+        'makespan': 'makespan'
     }
     problem_folder = problem_folders[args.problem]
 
@@ -188,6 +192,7 @@ if __name__ == '__main__':
     tf.set_random_seed(rng.randint(np.iinfo(int).max))
 
     ### SET-UP DATASET ###
+    print(f"--> data/samples/{problem_folder}/train")
     train_files = list(pathlib.Path(f'data/samples/{problem_folder}/train').glob('sample_*.pkl'))
     valid_files = list(pathlib.Path(f'data/samples/{problem_folder}/valid').glob('sample_*.pkl'))
 
@@ -231,6 +236,8 @@ if __name__ == '__main__':
     pretrain_data = pretrain_data.map(load_batch_tf)
     pretrain_data = pretrain_data.prefetch(1)
 
+    print("***")
+    print(pretrain_data)
     ### MODEL LOADING ###
     sys.path.insert(0, os.path.abspath(f'models/{args.model}'))
     import model

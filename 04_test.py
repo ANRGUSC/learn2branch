@@ -118,7 +118,7 @@ if __name__ == '__main__':
     parser.add_argument(
         'problem',
         help='MILP instance type to process.',
-        choices=['setcover', 'cauctions', 'facilities', 'indset'],
+        choices=['makespan','setcover', 'cauctions', 'facilities', 'indset'],
     )
     parser.add_argument(
         '-g', '--gpu',
@@ -133,7 +133,9 @@ if __name__ == '__main__':
 
     os.makedirs("results", exist_ok=True)
     result_file = f"results/{args.problem}_validation_{time.strftime('%Y%m%d-%H%M%S')}.csv"
-    seeds = [0, 1, 2, 3, 4]
+    ######
+    seeds = [0]#, 1, 2, 3, 4]
+    ######
     gcnn_models = ['baseline']
     other_models = ['extratrees_gcnn_agg', 'lambdamart_khalil', 'svmrank_khalil']
     test_batch_size = 128
@@ -144,6 +146,7 @@ if __name__ == '__main__':
         'cauctions': 'cauctions/100_500',
         'facilities': 'facilities/100_100_5',
         'indset': 'indset/500_4',
+        'makespan' : 'makespan'
     }
     problem_folder = problem_folders[args.problem]
 
@@ -170,8 +173,8 @@ if __name__ == '__main__':
 
     print(f"{len(test_files)} test samples")
 
-    evaluated_policies = [['gcnn', model] for model in gcnn_models] + \
-            [['ml-competitor', model] for model in other_models]
+    evaluated_policies = [['gcnn', model] for model in gcnn_models] #+ \
+    #        [['ml-competitor', model] for model in other_models]
 
     fieldnames = [
         'policy',
@@ -232,6 +235,7 @@ if __name__ == '__main__':
                     policy['batch_fun'], [x], policy['batch_datatypes']))
                 test_data = test_data.prefetch(2)
 
+                print(f"test data {test_data} and policy {policy}")
                 test_kacc = process(policy, test_data, top_k)
                 print(f"  {seed} " + " ".join([f"acc@{k}: {100*acc:4.1f}" for k, acc in zip(top_k, test_kacc)]))
 
